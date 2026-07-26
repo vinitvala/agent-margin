@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# Costs computed here are NOTIONAL: token counts priced at Anthropic's published
+# API rates. If Claude Code runs under a subscription (Pro/Max) rather than a
+# metered API key, no money is actually billed per-token -- this is a shadow
+# cost / proxy for AI effort, confirmed against a real Console usage page
+# during Gate 1 of the v0 build (see reconcile.py).
+
 from dataclasses import dataclass
 
 from .walker import CostEvent
@@ -10,6 +16,7 @@ PRICES: dict[str, tuple[float, float]] = {
     "claude-sonnet-5": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),  # same Opus 4.x rate card as 4-8, per user confirmation
 }
 
 # cache_creation_input_tokens is not one price bucket: Anthropic prices a
