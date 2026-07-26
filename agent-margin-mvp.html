@@ -64,7 +64,7 @@
 
   <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:1.25rem;">
     <div class="card"><p class="lbl">Contract value</p><p class="val" id="stat-contract"></p></div>
-    <div class="card"><p class="lbl">AI COGS (notional)</p><p class="val" id="stat-cogs"></p></div>
+    <div class="card"><p class="lbl" id="stat-cogs-label">AI cost</p><p class="val" id="stat-cogs"></p></div>
     <div class="card"><p class="lbl">Gross margin</p><p class="val" id="stat-margin"></p></div>
     <div class="card"><p class="lbl">Gap hours</p><p class="val" id="stat-gap" style="color:var(--text-danger);"></p></div>
   </div>
@@ -83,9 +83,10 @@
       <tr style="border-bottom:0.5px solid var(--border-strong);">
         <th style="width:74px;">Ticket</th>
         <th>Title</th>
-        <th style="width:86px;" class="num">AI spend</th>
-        <th style="width:76px;" class="num">Hrs saved</th>
-        <th style="width:92px;" class="num">Net value</th>
+        <th style="width:96px;" class="num" id="col-cost">Cost</th>
+        <th style="width:78px;" class="num">Capacity</th>
+        <th style="width:76px;" class="num modelled-col">Hrs saved</th>
+        <th style="width:92px;" class="num modelled-col">Net value</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
@@ -93,11 +94,16 @@
       <tr style="border-top:0.5px solid var(--border-strong);">
         <td colspan="2" style="padding:10px 4px; font-weight:500;">Total</td>
         <td class="num" id="total-spend" style="padding:10px 4px; font-weight:500;"></td>
-        <td class="num" id="total-saved" style="padding:10px 4px; font-weight:500;"></td>
-        <td class="num" id="total-net" style="padding:10px 4px; font-weight:500;"></td>
+        <td class="num" id="total-share" style="padding:10px 4px; font-weight:500; color:var(--text-secondary);"></td>
+        <td class="num modelled-col" id="total-saved" style="padding:10px 4px; font-weight:500;"></td>
+        <td class="num modelled-col" id="total-net" style="padding:10px 4px; font-weight:500;"></td>
       </tr>
     </tfoot>
   </table>
+
+  <div id="inputs-warning" style="display:none; border-left:3px solid var(--border-danger); background:var(--bg-danger); padding:12px 14px; margin-top:1.25rem;">
+    <p id="inputs-warning-text" style="font-size:13px; color:var(--text-danger);"></p>
+  </div>
 
   <div id="negative-callout" style="display:none; border-left:3px solid var(--border-danger); background:var(--bg-danger); padding:12px 14px; margin-top:1.25rem;">
     <p id="negative-callout-text" style="font-size:13px; color:var(--text-danger);"></p>
@@ -111,81 +117,129 @@
 const money = n => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
 let tickets = [];
-let project = {};
+let ledger = {};
+// Whether any ticket has a human-supplied baseline. With none, every
+// hours-based figure is null and the savings/net columns are hidden entirely
+// rather than filled with a fabricated number.
+let hasModelledHours = false;
+
+function costOf(t) {
+  // Prefer allocated seat cost (real money) over the notional driver.
+  return t.measured.allocated_seat_cost ?? t.measured.notional_token_cost;
+}
 
 function render(key) {
   const rows = tickets.slice().sort((a, b) =>
-    key === 'id' ? a.ticket_id.localeCompare(b.ticket_id) : key === 'net' ? a.net - b.net : b.agent_cost - a.agent_cost);
-  const max = Math.max(...tickets.map(d => d.agent_cost), 0.01);
+    key === 'id' ? a.ticket_id.localeCompare(b.ticket_id)
+    : key === 'net' ? ((a.modelled.net_value ?? 0) - (b.modelled.net_value ?? 0))
+    : costOf(b) - costOf(a));
+  const max = Math.max(...tickets.map(costOf), 0.01);
 
   document.getElementById('rows').innerHTML = rows.map(d => {
-    const bad = d.net < 0;
-    const w = Math.round(d.agent_cost / max * 100);
-    const savedDisplay = d.hours_saved === null ? '—' : Math.round(d.hours_saved * 10) / 10;
+    const cost = costOf(d);
+    const net = d.modelled.net_value;
+    const bad = net !== null && net < 0;
+    const w = Math.round(cost / max * 100);
+    const share = d.measured.capacity_share_pct;
+    const modelledCells = hasModelledHours ? `
+      <td class="num">${d.modelled.hours_saved === null ? '<span style="color:var(--text-muted);">—</span>' : (Math.round(d.modelled.hours_saved * 10) / 10)}</td>
+      <td class="num" style="color:${net === null ? 'var(--text-muted)' : bad ? 'var(--text-danger)' : 'var(--text-success)'};">${net === null ? '—' : (net >= 0 ? '+' : '') + money(net)}</td>` : '';
     return `<tr style="border-bottom:0.5px solid var(--border);">
       <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary);">${d.ticket_id}</td>
       <td style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.title}</td>
       <td class="num">
         <div style="display:flex; align-items:center; justify-content:flex-end; gap:6px;">
           <span style="display:block; height:4px; width:${w}%; max-width:34px; background:${bad ? '#d03b3b' : '#888780'}; border-radius:2px;"></span>
-          <span>${money(d.agent_cost)}</span>
+          <span>${money(cost)}</span>
         </div>
       </td>
-      <td class="num" style="color:${(d.hours_saved ?? 0) <= 0 ? 'var(--text-danger)' : 'var(--text-primary)'};">${savedDisplay}</td>
-      <td class="num" style="color:${bad ? 'var(--text-danger)' : 'var(--text-success)'};">${d.net >= 0 ? '+' : ''}${money(d.net)}</td>
+      <td class="num" style="color:var(--text-secondary);">${share === null ? '—' : (share * 100).toFixed(1) + '%'}</td>
+      ${modelledCells}
     </tr>`;
   }).join('');
 }
 
-fetch('ledger.json').then(r => r.json()).then(ledger => {
-  project = ledger.project;
-  tickets = ledger.tickets.map(t => ({
-    ...t,
-    // hours_saved is null for tickets still in progress (no completedAt yet);
-    // treat as 0 saved hours for netting rather than hiding the cost.
-    net: (t.hours_saved ?? 0) * project.blended_cost_rate - t.agent_cost,
-  }));
+fetch('ledger.json').then(r => r.json()).then(data => {
+  ledger = data;
+  const p = ledger.project;
+  const m = p.measured, mod = p.modelled, inp = p.inputs;
+  tickets = ledger.tickets;
+  hasModelledHours = tickets.some(t => t.modelled.hours_saved !== null);
 
-  document.getElementById('hdr-title').textContent = `${project.client} · ${project.project}`;
-  document.getElementById('hdr-sub').textContent = 'fixed fee · cost attributed via git branch to Claude Code sessions';
+  const allocated = m.allocated_seat_cost !== null;
+  const aiCost = allocated ? m.allocated_seat_cost : m.notional_token_cost;
 
-  const aiNetValue = project.discount_given - project.gap_value;
-  document.getElementById('summary-line').textContent =
-    `You discounted this project by ${money(project.discount_given)} because you use AI. AI actually netted you ${money(aiNetValue)}.`;
-  document.getElementById('summary-value').textContent = money(Math.abs(project.gap_value));
-  document.getElementById('summary-value').style.color = project.gap_value >= 0 ? 'var(--text-danger)' : 'var(--text-success)';
-  document.getElementById('summary-caption').textContent =
-    project.gap_value >= 0 ? 'given away beyond what AI saved you' : 'AI saved you more than the discount given';
+  document.getElementById('hdr-title').textContent = `${inp.client} · ${inp.project}`;
+  document.getElementById('hdr-sub').textContent =
+    `agent cost attributed via git branch to Claude Code sessions · ${ledger.meta.cost_basis === 'allocated_seat_cost' ? 'allocated seat cost' : 'notional token cost'}`;
 
-  document.getElementById('stat-contract').textContent = money(project.contract_value);
-  document.getElementById('stat-cogs').textContent = money(project.agent_cost);
-  document.getElementById('stat-margin').textContent = `${(project.gross_margin_pct * 100).toFixed(1)}%`;
-  document.getElementById('stat-gap').textContent = project.gap_hours.toFixed(1);
+  // Headline: only a real, human-supplied baseline earns the break-even claim.
+  if (hasModelledHours && mod.gap_value !== null) {
+    document.getElementById('summary-line').textContent =
+      `You discounted this project by ${money(inp.discount_given)} because you use AI. AI netted you ${money(inp.discount_given - mod.gap_value)}.`;
+    document.getElementById('summary-value').textContent = money(Math.abs(mod.gap_value));
+    document.getElementById('summary-value').style.color = mod.gap_value >= 0 ? 'var(--text-danger)' : 'var(--text-success)';
+    document.getElementById('summary-caption').textContent =
+      mod.gap_value >= 0 ? 'given away beyond what AI saved you' : 'AI saved you more than the discount given';
+  } else {
+    document.getElementById('summary-line').textContent =
+      `${allocated ? 'Seat cost allocated to this project by measured token share' : 'Notional agent cost for this project'}, across ${tickets.length} ticket${tickets.length === 1 ? '' : 's'}.`;
+    document.getElementById('summary-value').textContent = money(aiCost);
+    document.getElementById('summary-value').style.color = 'var(--text-primary)';
+    document.getElementById('summary-caption').textContent =
+      'Break-even against the discount is not shown: it needs a human estimate of what this work would have taken without AI.';
+  }
+
+  document.getElementById('stat-contract').textContent = money(inp.contract_value);
+  document.getElementById('stat-cogs-label').textContent =
+    allocated ? 'AI cost (allocated seat)' : 'AI cost (notional)';
+  document.getElementById('stat-cogs').textContent = money(aiCost);
+  document.getElementById('stat-margin').textContent =
+    mod.gross_margin_pct === null ? '—' : `${(mod.gross_margin_pct * 100).toFixed(1)}%`;
+  document.getElementById('stat-gap').textContent =
+    mod.gap_hours === null ? '—' : mod.gap_hours.toFixed(1);
+  if (mod.gap_hours === null) document.getElementById('stat-gap').style.color = 'var(--text-muted)';
 
   document.getElementById('ticket-count-line').textContent =
-    `${tickets.length} ticket${tickets.length === 1 ? '' : 's'} · joined via git branch to Claude Code sessions` +
-    (project.unattributed_pct > 0 ? ` · ${(project.unattributed_pct * 100).toFixed(0)}% of agent spend unattributed` : '');
+    `${tickets.length} ticket${tickets.length === 1 ? '' : 's'}` +
+    (m.unattributed_pct > 0 ? ` · ${(m.unattributed_pct * 100).toFixed(0)}% of agent usage unattributed` : '') +
+    (allocated ? ` · ${(m.project_capacity_share_pct * 100).toFixed(0)}% of this machine's agent capacity` : '');
 
-  const totalSpend = tickets.reduce((s, t) => s + t.agent_cost, 0);
-  const totalSaved = tickets.reduce((s, t) => s + (t.hours_saved ?? 0), 0);
-  const totalNet = tickets.reduce((s, t) => s + t.net, 0);
-  document.getElementById('total-spend').textContent = money(totalSpend);
-  document.getElementById('total-saved').textContent = Math.round(totalSaved * 10) / 10;
-  document.getElementById('total-net').textContent = (totalNet >= 0 ? '+' : '') + money(totalNet);
-  document.getElementById('total-net').style.color = totalNet >= 0 ? 'var(--text-success)' : 'var(--text-danger)';
+  document.getElementById('col-cost').textContent = allocated ? 'Allocated cost' : 'Notional cost';
+  if (!hasModelledHours) {
+    document.querySelectorAll('.modelled-col').forEach(el => el.remove());
+  }
 
-  const losers = tickets.filter(t => t.net < 0).sort((a, b) => a.net - b.net);
+  const totalCost = tickets.reduce((s, t) => s + costOf(t), 0);
+  document.getElementById('total-spend').textContent = money(totalCost);
+  document.getElementById('total-share').textContent =
+    allocated ? (tickets.reduce((s, t) => s + (t.measured.capacity_share_pct ?? 0), 0) * 100).toFixed(1) + '%' : '—';
+  if (hasModelledHours) {
+    const totalSaved = tickets.reduce((s, t) => s + (t.modelled.hours_saved ?? 0), 0);
+    const totalNet = tickets.reduce((s, t) => s + (t.modelled.net_value ?? 0), 0);
+    document.getElementById('total-saved').textContent = Math.round(totalSaved * 10) / 10;
+    document.getElementById('total-net').textContent = (totalNet >= 0 ? '+' : '') + money(totalNet);
+    document.getElementById('total-net').style.color = totalNet >= 0 ? 'var(--text-success)' : 'var(--text-danger)';
+  }
+
+  const losers = tickets.filter(t => t.modelled.net_value !== null && t.modelled.net_value < 0)
+                        .sort((a, b) => a.modelled.net_value - b.modelled.net_value);
   if (losers.length > 0) {
     const worst = losers[0];
-    const lostSpend = losers.reduce((s, t) => s + t.agent_cost, 0);
+    const lost = losers.reduce((s, t) => s + costOf(t), 0);
     document.getElementById('negative-callout').style.display = 'block';
     document.getElementById('negative-callout-text').textContent =
-      `${losers.length} ticket${losers.length === 1 ? '' : 's'} consumed ${money(lostSpend)} of agent spend and returned less than ${losers.length === 1 ? 'it' : 'they'} cost. ` +
-      `${worst.ticket_id} alone netted ${money(worst.net)}.`;
+      `${losers.length} ticket${losers.length === 1 ? '' : 's'} consumed ${money(lost)} and returned less than ${losers.length === 1 ? 'it' : 'they'} cost. ` +
+      `${worst.ticket_id} alone netted ${money(worst.modelled.net_value)}.`;
+  }
+
+  if (!inp.verified) {
+    document.getElementById('inputs-warning').style.display = 'block';
+    document.getElementById('inputs-warning-text').textContent = inp.note;
   }
 
   document.getElementById('footnote').textContent =
-    `Live data from ledger.json (generated by python -m agent_margin build). Costs are notional: token usage priced at Anthropic's published API rates, not necessarily metered spend.`;
+    `Live data from ledger.json (python -m agent_margin build). ${ledger.meta.cost_basis_note} ${mod.basis}`;
 
   render('spend');
 }).catch(err => {

@@ -10,18 +10,31 @@ from dataclasses import dataclass
 
 from .walker import CostEvent
 
-# USD per 1M tokens, (input, output). Verify against current published rates
-# before trusting a number (https://www.anthropic.com/pricing).
+# USD per 1M tokens, (input, output). Verified 2026-07-26 against Anthropic's
+# published rates.
+#
+# CAVEAT: claude-sonnet-5 carries introductory pricing of $2.00/$10.00 through
+# 2026-08-31 -- i.e. right now. List price is used below because it's the
+# defensible default for a cost figure shown to a client. In a single-model
+# workload the choice cancels out of the allocation ratio; in a mixed-model one
+# it does not, and shifts weight between Sonnet and Opus tickets. Switch to
+# (2.00, 10.00) if you want allocation weighted at what you'd actually be
+# charged during the intro window.
 PRICES: dict[str, tuple[float, float]] = {
     "claude-sonnet-5": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
+    "claude-opus-5": (5.00, 25.00),
     "claude-opus-4-8": (5.00, 25.00),
-    "claude-opus-4-7": (5.00, 25.00),  # same Opus 4.x rate card as 4-8, per user confirmation
+    "claude-opus-4-7": (5.00, 25.00),
 }
 
 # cache_creation_input_tokens is not one price bucket: Anthropic prices a
 # 1-hour cache write differently from a 5-minute one. See walker.py -- real
 # Claude Code records split this via message.usage.cache_creation.
+#
+# Verified 2026-07-26 against published rates: cache reads ~0.10x base input,
+# cache writes 1.25x for 5-minute TTL and 2.0x for 1-hour TTL. These are the
+# numbers the whole ledger inherits, so they are sourced rather than asserted.
 CACHE_WRITE_1H_MULT = 2.00
 CACHE_WRITE_5M_MULT = 1.25
 CACHE_READ_MULT = 0.10
