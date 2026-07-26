@@ -93,6 +93,21 @@ def _prices_for_model(model: str, as_of: date | None = None) -> tuple[float, flo
     )
 
 
+def unpriced_models(events: list[CostEvent]) -> dict[str, int]:
+    """Every model in the events with no PRICES entry, mapped to event count.
+
+    Pricing raises on an unknown model, which is correct -- a silent fallback
+    price is how a wrong number reaches a customer. But raising mid-rollup
+    aborts the whole build on a traceback. Call this first so the failure is
+    immediate, complete (every missing model, not just the first), and says
+    what to do about it."""
+    missing: dict[str, int] = {}
+    for e in events:
+        if not any(e.model.startswith(p) for p in PRICES):
+            missing[e.model] = missing.get(e.model, 0) + 1
+    return missing
+
+
 def cost_for_event(event: CostEvent) -> CostBreakdown:
     price_in, price_out = _prices_for_model(event.model)
     return CostBreakdown(

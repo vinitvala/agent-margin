@@ -12,6 +12,11 @@ def main(argv: list[str] | None = None) -> int:
 
     build_parser = subparsers.add_parser("build", help="Build ledger.json from session transcripts")
     build_parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
+    build_parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refetch Linear issues instead of using the local cache (use after creating tickets)",
+    )
 
     reconcile_parser = subparsers.add_parser(
         "reconcile",
@@ -30,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "build":
         from . import build
 
-        build.run(config)
+        build.run(config, refresh_linear=args.refresh)
         return 0
 
     if args.command == "reconcile":
