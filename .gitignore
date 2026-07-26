@@ -6,3 +6,4 @@ linear_cache.json
 .env
 __pycache__/
 *.pyc
+.DS_Store

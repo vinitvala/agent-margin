@@ -9,8 +9,40 @@ from .attribution import ATTRIBUTED, NO_BRANCH, UNMATCHED_BRANCH, bucket_for_eve
 from .config import Config
 from .cost import cost_for_event, total_cost
 from .linear import get_issues, index_by_identifier
-from .rollup import build_project_ledger, build_ticket_ledgers, to_ledger_dict
-from .walker import parse_events, project_dir_for_cwd
+from .rollup import Allocation, build_project_ledger, build_ticket_ledgers, to_ledger_dict
+from .walker import all_project_dirs, parse_events, parse_events_multi, project_dir_for_cwd
+
+
+def _build_allocation(config: Config) -> Allocation | None:
+    """Denominator is ALL local agent usage for the period, not just this
+    project's -- scoped to one project, every project independently claims the
+    full seat and the sum across projects exceeds what was actually paid."""
+    if config.seat_cost_per_month is None:
+        print("\nAllocation: skipped (no seat_cost_per_month configured).")
+        return None
+
+    dirs = all_project_dirs()
+    all_events, _ = parse_events_multi(dirs, config.period_start, config.period_end)
+    denominator = total_cost(all_events).total
+
+    n_seats = config.n_seats
+    if n_seats != 1:
+        # This tool reads one machine's transcripts, so the denominator covers
+        # one person's usage. Allocating N seats across it inflates every ticket
+        # N-fold. Team-wide allocation needs team-wide transcripts -- a
+        # collection problem, not a config value.
+        print(f"\nAllocation: n_seats={n_seats} ignored -- the denominator covers only "
+              f"this machine's transcripts, so allocating {n_seats} seats across one "
+              f"person's usage would overstate every ticket. Forcing n_seats=1.")
+        n_seats = 1
+
+    print(f"\nAllocation: denominator ${denominator:,.2f} notional across "
+          f"{len(dirs)} project dir(s), pool ${config.seat_cost_per_month * n_seats:,.2f}")
+    return Allocation(
+        seat_cost_per_month=config.seat_cost_per_month,
+        n_seats=n_seats,
+        denominator_notional=denominator,
+    )
 
 
 def run(config: Config) -> None:
@@ -88,42 +120,73 @@ def run(config: Config) -> None:
     else:
         print("  All regex-matched ticket IDs resolved against Linear.")
 
-    tickets = build_ticket_ledgers(events, issues_by_id, config.points_to_hours_factor)
-    project = build_project_ledger(config, events, tickets)
+    allocation = _build_allocation(config)
 
+    tickets = build_ticket_ledgers(
+        events, issues_by_id, config.baseline_hours, config.blended_cost_rate, allocation
+    )
+    project = build_project_ledger(config, events, tickets, dict(bucket_totals), allocation)
+
+    m = project.measured
     print(f"\nRollup: {len(tickets)} tickets attributed")
-    print(
-        f"  agent_cost=${project.agent_cost:,.2f}  labour_cost=${project.labour_cost:,.2f}  "
-        f"total_cogs=${project.total_cogs:,.2f}"
-    )
-    print(
-        f"  gross_profit=${project.gross_profit:,.2f}  gross_margin={project.gross_margin_pct:.1%}  "
-        f"unattributed=${project.unattributed_cost:,.2f} ({project.unattributed_pct:.1%})"
-    )
-    print(
-        f"  breakeven_hours={project.breakeven_hours:.2f}  hours_saved={project.hours_saved:.2f}  "
-        f"gap_hours={project.gap_hours:.2f}  gap_value=${project.gap_value:,.2f}"
-    )
-
-    # Verification step 3: buckets + unattributed must equal the whole-project total.
-    attributed_ticket_cost = sum(t.agent_cost for t in tickets)
-    check_total = attributed_ticket_cost + project.unattributed_cost
-    if abs(check_total - project.agent_cost) > 0.005:
-        print(f"  MISMATCH: ticket costs + unattributed (${check_total:,.2f}) != agent_cost (${project.agent_cost:,.2f})")
+    print(f"  MEASURED  notional_token_cost=${m.notional_token_cost:,.2f}  "
+          f"unattributed=${m.unattributed_cost:,.2f} ({m.unattributed_pct:.1%})")
+    if m.allocated_seat_cost is not None:
+        print(f"            project_capacity_share={m.project_capacity_share_pct:.1%}  "
+              f"allocated_seat_cost=${m.allocated_seat_cost:,.2f}")
     else:
-        print("  OK -- ticket costs + unattributed reconcile against total agent_cost.")
+        print("            allocated_seat_cost=None (no seat_cost_per_month in config)")
+
+    mod = project.modelled
+    if mod.hours_saved is None:
+        print(f"  MODELLED  all hours-based figures null "
+              f"({project.tickets_with_baseline}/{project.tickets_total} tickets have a baseline)")
+    else:
+        print(f"  MODELLED  hours_saved={mod.hours_saved:.2f}  breakeven_hours={mod.breakeven_hours:.2f}  "
+              f"gap_hours={mod.gap_hours:.2f}  gap_value=${mod.gap_value:,.2f}")
+    print(f"  INPUTS    verified={project.inputs.verified}"
+          + ("" if project.inputs.verified else "  <- derived figures are illustrative only"))
+
+    # Verification step 3: ticket costs + unattributed must equal the project total.
+    attributed_ticket_cost = sum(t.measured.notional_token_cost for t in tickets)
+    check_total = attributed_ticket_cost + m.unattributed_cost
+    if abs(check_total - m.notional_token_cost) > 0.005:
+        print(f"  MISMATCH: ticket costs + unattributed (${check_total:,.2f}) "
+              f"!= total (${m.notional_token_cost:,.2f})")
+    else:
+        print("  OK -- ticket costs + unattributed reconcile against the project total.")
 
     # Verification step 4: median should sit far below mean, or attribution is
     # smearing cost evenly across tickets instead of reflecting a real long tail.
-    ticket_costs = [t.agent_cost for t in tickets]
+    # Underpowered below ~15 tickets -- reported, but not treated as a signal.
+    ticket_costs = [t.measured.notional_token_cost for t in tickets]
     if len(ticket_costs) >= 2:
         median_cost = statistics.median(ticket_costs)
         mean_cost = statistics.mean(ticket_costs)
-        print(f"  Distribution check: median=${median_cost:,.4f}  mean=${mean_cost:,.4f}")
-        if mean_cost > 0 and median_cost / mean_cost > 0.8:
-            print("  WARNING: median is close to mean -- cost may be smeared evenly, check attribution.")
+        ratio = median_cost / mean_cost if mean_cost else 0.0
+        print(f"  Distribution: median=${median_cost:,.4f}  mean=${mean_cost:,.4f}  ratio={ratio:.2f}")
+        if len(ticket_costs) < 15:
+            print(f"    n={len(ticket_costs)} -- too few tickets for this check to have power; "
+                  f"not a signal either way.")
+        elif ratio > 0.8:
+            print("    WARNING: median close to mean -- cost may be smeared evenly, check attribution.")
 
-    ledger = to_ledger_dict(project, tickets)
+    if allocation is not None:
+        cost_basis = "allocated_seat_cost"
+        cost_basis_note = (
+            "Real seat cost apportioned by measured token share. True under both "
+            "subscription and metered billing. notional_token_cost is retained as "
+            "the allocation driver, not as a price paid."
+        )
+    else:
+        cost_basis = "notional"
+        cost_basis_note = (
+            "Token counts priced at published API rates. Under a subscription no "
+            "money is billed per token, so this is a proxy for agent effort, not "
+            "spend. Set seat_cost_per_month in config to allocate real seat cost."
+        )
+
+    ledger = to_ledger_dict(config, project, tickets, cost_basis, cost_basis_note)
     ledger_path = Path("ledger.json")
     with ledger_path.open("w") as f:
         json.dump(ledger, f, indent=2)
