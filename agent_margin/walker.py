@@ -56,6 +56,12 @@ def _session_files(project_dir: Path):
     return sorted(project_dir.glob("*.jsonl"))
 
 
+def all_project_dirs(claude_root: Path = CLAUDE_PROJECTS_ROOT) -> list[Path]:
+    if not claude_root.exists():
+        return []
+    return sorted(p for p in claude_root.iterdir() if p.is_dir())
+
+
 def parse_events(
     project_dir: Path,
     period_start: datetime | None = None,
@@ -140,3 +146,27 @@ def parse_events(
                     stats.latest = timestamp
 
     return events, stats
+
+
+def parse_events_multi(
+    project_dirs: list[Path],
+    period_start: datetime | None = None,
+    period_end: datetime | None = None,
+) -> tuple[list[CostEvent], WalkStats]:
+    """Same as parse_events but across several project directories -- used for
+    Gate 1 reconciliation, since the Anthropic Console total is account-wide,
+    not scoped to one Claude Code project directory."""
+    all_events: list[CostEvent] = []
+    combined = WalkStats()
+    for project_dir in project_dirs:
+        events, stats = parse_events(project_dir, period_start, period_end)
+        all_events.extend(events)
+        combined.event_count += stats.event_count
+        combined.skipped_no_usage += stats.skipped_no_usage
+        combined.malformed_lines += stats.malformed_lines
+        combined.duplicate_records += stats.duplicate_records
+        if stats.earliest and (combined.earliest is None or stats.earliest < combined.earliest):
+            combined.earliest = stats.earliest
+        if stats.latest and (combined.latest is None or stats.latest > combined.latest):
+            combined.latest = stats.latest
+    return all_events, combined
