@@ -7,26 +7,37 @@ from __future__ import annotations
 # during Gate 1 of the v0 build (see reconcile.py).
 
 from dataclasses import dataclass
+from datetime import date
 
 from .walker import CostEvent
 
 # USD per 1M tokens, (input, output). Verified 2026-07-26 against Anthropic's
 # published rates.
 #
-# CAVEAT: claude-sonnet-5 carries introductory pricing of $2.00/$10.00 through
-# 2026-08-31 -- i.e. right now. List price is used below because it's the
-# defensible default for a cost figure shown to a client. In a single-model
-# workload the choice cancels out of the allocation ratio; in a mixed-model one
-# it does not, and shifts weight between Sonnet and Opus tickets. Switch to
-# (2.00, 10.00) if you want allocation weighted at what you'd actually be
-# charged during the intro window.
+# Entries carry an optional expiry. Promotional pricing that silently becomes
+# wrong on its end date is a worse failure than a stale list price, because
+# nothing surfaces it -- so an expired entry RAISES rather than being used.
+# The date is the risk here, not the rate.
+#
+# Note the effect is second-order for allocation: the price level cancels in
+# the capacity-share ratio. Only the relative weighting between models moves,
+# so a mixed Sonnet/Opus workload shifts and a single-model one does not.
+PRICE_EXPIRY: dict[str, date] = {
+    # Claude Sonnet 5 introductory pricing. Reverts to (3.00, 15.00) after this.
+    "claude-sonnet-5": date(2026, 8, 31),
+}
+
 PRICES: dict[str, tuple[float, float]] = {
-    "claude-sonnet-5": (3.00, 15.00),
+    "claude-sonnet-5": (2.00, 10.00),  # intro rate; see PRICE_EXPIRY
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-opus-5": (5.00, 25.00),
     "claude-opus-4-8": (5.00, 25.00),
     "claude-opus-4-7": (5.00, 25.00),
 }
+
+
+class ExpiredPriceError(ValueError):
+    pass
 
 # cache_creation_input_tokens is not one price bucket: Anthropic prices a
 # 1-hour cache write differently from a 5-minute one. See walker.py -- real
@@ -63,9 +74,18 @@ class CostBreakdown:
         )
 
 
-def _prices_for_model(model: str) -> tuple[float, float]:
+def _prices_for_model(model: str, as_of: date | None = None) -> tuple[float, float]:
+    as_of = as_of or date.today()
     for prefix, prices in PRICES.items():
         if model.startswith(prefix):
+            expiry = PRICE_EXPIRY.get(prefix)
+            if expiry is not None and as_of > expiry:
+                raise ExpiredPriceError(
+                    f"Price for {prefix!r} expired on {expiry.isoformat()} "
+                    f"(today is {as_of.isoformat()}). It was promotional pricing. "
+                    f"Update PRICES in cost.py and clear the PRICE_EXPIRY entry -- "
+                    f"refusing to price at a rate that is no longer offered."
+                )
             return prices
     raise UnknownModelError(
         f"No price table entry matches model {model!r}. "

@@ -41,6 +41,20 @@ class Allocation:
 
 
 @dataclass
+class ProjectDirUsage:
+    """One Claude Code project directory = one working tree. Across a real
+    agency these stand in for separate clients, which is what makes the
+    allocation mechanism legible: the seat is shared, and this is the split."""
+
+    dir_name: str
+    notional_token_cost: float
+    capacity_share_pct: float
+    allocated_seat_cost: float
+    event_count: int
+    is_current_project: bool
+
+
+@dataclass
 class TicketMeasured:
     notional_token_cost: float
     # Share of all agent capacity consumed on this machine for the period.
@@ -88,6 +102,8 @@ class ProjectMeasured:
     project_capacity_share_pct: float | None
     allocated_seat_cost: float | None
     seat_cost_basis: str | None
+    # Every project directory on this machine, not just the current one.
+    capacity_by_project_dir: list[dict]
     ticket_count: int
     event_count: int
     session_count: int
@@ -224,6 +240,7 @@ def build_project_ledger(
     tickets: list[TicketLedger],
     bucket_totals: dict[str, float],
     allocation: Allocation | None = None,
+    dir_usage: list[ProjectDirUsage] | None = None,
 ) -> ProjectLedger:
     total_agent_cost = sum(cost_for_event(e).total for e in events)
     attributed_cost = sum(t.measured.notional_token_cost for t in tickets)
@@ -308,6 +325,7 @@ def build_project_ledger(
             project_capacity_share_pct=project_share,
             allocated_seat_cost=project_allocated,
             seat_cost_basis=seat_basis,
+            capacity_by_project_dir=[asdict(d) for d in (dir_usage or [])],
             ticket_count=len(tickets),
             event_count=len(events),
             session_count=len({e.session_id for e in events}),
