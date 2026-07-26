@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .attribution import ATTRIBUTED, NO_BRANCH, UNMATCHED_BRANCH, bucket_for_event
 from .config import Config
-from .cost import cost_for_event, total_cost
+from .cost import cost_for_event, total_cost, unpriced_models
 from .linear import get_issues, index_by_identifier
 from .rollup import (
     Allocation,
@@ -80,7 +80,7 @@ def _build_allocation(config: Config) -> Allocation | None:
     )
 
 
-def run(config: Config) -> None:
+def run(config: Config, refresh_linear: bool = False) -> None:
     print(f"Config OK: {config.project_name} / {config.client_name}")
     print(f"Period: {config.period_start.isoformat()} .. {config.period_end.isoformat()}")
 
@@ -96,6 +96,28 @@ def run(config: Config) -> None:
         f"Duplicate records collapsed: {stats.duplicate_records}  "
         f"Malformed lines: {stats.malformed_lines}"
     )
+
+    if stats.event_count == 0:
+        print(
+            "\nNo events in the reporting period. Either this project has no Claude "
+            "Code history, or config.yaml's period window doesn't cover it -- check "
+            "period.start / period.end against when the work actually happened."
+        )
+        return
+
+    # Pre-flight: fail immediately and completely on unpriced models rather than
+    # part-way through the rollup.
+    missing = unpriced_models(events)
+    if missing:
+        print("\nUNPRICED MODEL(S) -- refusing to build a ledger with a guessed price:")
+        for model, count in sorted(missing.items(), key=lambda kv: -kv[1]):
+            print(f"  {model:32s} {count:>5} events")
+        print(
+            "\nAdd each to PRICES in agent_margin/cost.py with its real "
+            "(input, output) USD-per-1M rate. Pricing one of these at a neighbouring "
+            "model's rate would silently misstate every ticket it touched."
+        )
+        return
 
     breakdown = total_cost(events)
     cache_write = breakdown.cache_write_1h_cost + breakdown.cache_write_5m_cost
@@ -142,16 +164,23 @@ def run(config: Config) -> None:
     else:
         print("  OK -- bucket totals reconcile against total cost.")
 
-    issues = get_issues(config.linear_api_key)
+    issues = get_issues(config.linear_api_key, use_cache=not refresh_linear)
     issues_by_id = index_by_identifier(issues)
-    print(f"\nLinear: {len(issues)} issues loaded (cached at .cache/linear_cache.json)")
+    print(
+        f"\nLinear: {len(issues)} issues loaded "
+        f"({'refetched' if refresh_linear else 'cached at .cache/linear_cache.json'})"
+    )
 
     unresolved = sorted(ticket_ids_seen[ATTRIBUTED] - issues_by_id.keys())
     if unresolved:
+        # Almost always a stale cache rather than a genuinely missing ticket:
+        # a ticket created after the cache was written won't be in it.
         print(
             f"  WARNING: {len(unresolved)} regex-matched ticket ID(s) not found in "
             f"Linear -- will fold into unattributed at rollup: {unresolved}"
         )
+        if not refresh_linear:
+            print("  If these tickets do exist, the cache is stale: re-run with --refresh.")
     else:
         print("  All regex-matched ticket IDs resolved against Linear.")
 
