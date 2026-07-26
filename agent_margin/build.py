@@ -7,6 +7,7 @@ from collections import defaultdict
 from .attribution import ATTRIBUTED, NO_BRANCH, UNMATCHED_BRANCH, bucket_for_event
 from .config import Config
 from .cost import cost_for_event, total_cost
+from .linear import get_issues, index_by_identifier
 from .walker import parse_events, project_dir_for_cwd
 
 
@@ -72,4 +73,17 @@ def run(config: Config) -> None:
     else:
         print("  OK -- bucket totals reconcile against total cost.")
 
-    print("\nLinear enrichment and rollup land in later tickets.")
+    issues = get_issues(config.linear_api_key)
+    issues_by_id = index_by_identifier(issues)
+    print(f"\nLinear: {len(issues)} issues loaded (cached at .cache/linear_cache.json)")
+
+    unresolved = sorted(ticket_ids_seen[ATTRIBUTED] - issues_by_id.keys())
+    if unresolved:
+        print(
+            f"  WARNING: {len(unresolved)} regex-matched ticket ID(s) not found in "
+            f"Linear -- will fold into unattributed at rollup: {unresolved}"
+        )
+    else:
+        print("  All regex-matched ticket IDs resolved against Linear.")
+
+    print("\nRollup and ledger.json emit land in the next ticket.")
