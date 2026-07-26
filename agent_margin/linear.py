@@ -17,7 +17,7 @@ query($after: String) {
       state { name type }
       assignee { name }
       project { id name }
-      completedAt createdAt
+      completedAt createdAt startedAt
     }
   }
 }

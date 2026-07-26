@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
-
+import json
+import statistics
 from collections import defaultdict
+from pathlib import Path
 
 from .attribution import ATTRIBUTED, NO_BRANCH, UNMATCHED_BRANCH, bucket_for_event
 from .config import Config
 from .cost import cost_for_event, total_cost
 from .linear import get_issues, index_by_identifier
+from .rollup import build_project_ledger, build_ticket_ledgers, to_ledger_dict
 from .walker import parse_events, project_dir_for_cwd
 
 
@@ -86,4 +88,43 @@ def run(config: Config) -> None:
     else:
         print("  All regex-matched ticket IDs resolved against Linear.")
 
-    print("\nRollup and ledger.json emit land in the next ticket.")
+    tickets = build_ticket_ledgers(events, issues_by_id, config.points_to_hours_factor)
+    project = build_project_ledger(config, events, tickets)
+
+    print(f"\nRollup: {len(tickets)} tickets attributed")
+    print(
+        f"  agent_cost=${project.agent_cost:,.2f}  labour_cost=${project.labour_cost:,.2f}  "
+        f"total_cogs=${project.total_cogs:,.2f}"
+    )
+    print(
+        f"  gross_profit=${project.gross_profit:,.2f}  gross_margin={project.gross_margin_pct:.1%}  "
+        f"unattributed=${project.unattributed_cost:,.2f} ({project.unattributed_pct:.1%})"
+    )
+    print(
+        f"  breakeven_hours={project.breakeven_hours:.2f}  hours_saved={project.hours_saved:.2f}  "
+        f"gap_hours={project.gap_hours:.2f}  gap_value=${project.gap_value:,.2f}"
+    )
+
+    # Verification step 3: buckets + unattributed must equal the whole-project total.
+    attributed_ticket_cost = sum(t.agent_cost for t in tickets)
+    check_total = attributed_ticket_cost + project.unattributed_cost
+    if abs(check_total - project.agent_cost) > 0.005:
+        print(f"  MISMATCH: ticket costs + unattributed (${check_total:,.2f}) != agent_cost (${project.agent_cost:,.2f})")
+    else:
+        print("  OK -- ticket costs + unattributed reconcile against total agent_cost.")
+
+    # Verification step 4: median should sit far below mean, or attribution is
+    # smearing cost evenly across tickets instead of reflecting a real long tail.
+    ticket_costs = [t.agent_cost for t in tickets]
+    if len(ticket_costs) >= 2:
+        median_cost = statistics.median(ticket_costs)
+        mean_cost = statistics.mean(ticket_costs)
+        print(f"  Distribution check: median=${median_cost:,.4f}  mean=${mean_cost:,.4f}")
+        if mean_cost > 0 and median_cost / mean_cost > 0.8:
+            print("  WARNING: median is close to mean -- cost may be smeared evenly, check attribution.")
+
+    ledger = to_ledger_dict(project, tickets)
+    ledger_path = Path("ledger.json")
+    with ledger_path.open("w") as f:
+        json.dump(ledger, f, indent=2)
+    print(f"\nWrote {ledger_path}")
