@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from collections import defaultdict
+
+from .attribution import ATTRIBUTED, NO_BRANCH, UNMATCHED_BRANCH, bucket_for_event
 from .config import Config
-from .cost import total_cost
+from .cost import cost_for_event, total_cost
 from .walker import parse_events, project_dir_for_cwd
 
 
@@ -40,4 +43,33 @@ def run(config: Config) -> None:
             f"cache_write is {cache_write / breakdown.total:.1%} of cost"
         )
 
-    print("\nAttribution and rollup land in later tickets.")
+    bucket_totals = defaultdict(float)
+    bucket_counts = defaultdict(int)
+    ticket_ids_seen = defaultdict(set)
+    for event in events:
+        bucket, ticket_id = bucket_for_event(event)
+        bucket_totals[bucket] += cost_for_event(event).total
+        bucket_counts[bucket] += 1
+        if ticket_id:
+            ticket_ids_seen[bucket].add(ticket_id)
+
+    bucket_sum = sum(bucket_totals.values())
+    print("\nGATE 2 -- attribution buckets (regex-matched; Linear existence checked in the next stage):")
+    for bucket, label in (
+        (ATTRIBUTED, "attributed"),
+        (UNMATCHED_BRANCH, "unmatched branch"),
+        (NO_BRANCH, "no branch"),
+    ):
+        pct = (bucket_totals[bucket] / breakdown.total * 100) if breakdown.total else 0.0
+        print(
+            f"  {label:18s} ${bucket_totals[bucket]:>8,.2f}  ({pct:5.1f}%)  "
+            f"{bucket_counts[bucket]:>4} events"
+            + (f"  tickets: {sorted(ticket_ids_seen[bucket])}" if ticket_ids_seen[bucket] else "")
+        )
+    print(f"  {'sum':18s} ${bucket_sum:>8,.2f}   vs total ${breakdown.total:,.2f}")
+    if abs(bucket_sum - breakdown.total) > 0.005:
+        print("  MISMATCH -- bucket totals do not sum to total cost. Records are being dropped.")
+    else:
+        print("  OK -- bucket totals reconcile against total cost.")
+
+    print("\nLinear enrichment and rollup land in later tickets.")
