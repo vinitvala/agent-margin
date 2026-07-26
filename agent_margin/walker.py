@@ -53,7 +53,12 @@ def _parse_ts(value: str) -> datetime:
 def _session_files(project_dir: Path):
     if not project_dir.exists():
         return []
-    return sorted(project_dir.glob("*.jsonl"))
+    # rglob, not glob: subagent transcripts live one level down at
+    # <session-id>/subagents/agent-*.jsonl. A non-recursive glob silently
+    # omits every subagent's spend -- which parser-spec.md section 7 is
+    # explicit is real cost that must be included. Caught by cross-checking
+    # file discovery against two independent parsers, both of which recurse.
+    return sorted(project_dir.rglob("*.jsonl"))
 
 
 def all_project_dirs(claude_root: Path = CLAUDE_PROJECTS_ROOT) -> list[Path]:
@@ -67,9 +72,8 @@ def parse_events(
     period_start: datetime | None = None,
     period_end: datetime | None = None,
 ) -> tuple[list[CostEvent], WalkStats]:
-    events: list[CostEvent] = []
+    best: dict[str, CostEvent] = {}
     stats = WalkStats()
-    seen_keys: set[str] = set()
 
     for path in _session_files(project_dir):
         with path.open(encoding="utf-8", errors="replace") as f:
@@ -105,14 +109,20 @@ def parse_events(
 
                 # One logical API turn can be split across multiple JSONL lines
                 # (one per content block, e.g. "thinking" + "text"), each with a
-                # distinct top-level uuid but the same message.id and an identical
-                # copy of that turn's usage. Deduping on uuid alone double-counts
-                # these. message.id is the real per-API-call identity.
+                # distinct top-level uuid but the same message.id. Deduping on
+                # uuid alone double-counts these. message.id is the real
+                # per-API-call identity.
+                #
+                # WHICH record in the group is kept matters. Partial/streaming
+                # records can carry a placeholder output_tokens (commonly 1)
+                # while only the final consolidated record has the true count --
+                # e.g. [1, 1, 292] for a single message.id. Keeping the first
+                # record undercounts output (6,490 tokens, ~3.6%, on this repo's
+                # own history). Keep the record with the highest output_tokens,
+                # wholesale, so every field comes from the consolidated copy;
+                # input and cache fields are fixed at request time and agree
+                # across the group.
                 dedup_key = message.get("id") or record.get("uuid")
-                if dedup_key in seen_keys:
-                    stats.duplicate_records += 1
-                    continue
-                seen_keys.add(dedup_key)
 
                 cache_creation = usage.get("cache_creation")
                 creation_total = usage.get("cache_creation_input_tokens") or 0
@@ -138,13 +148,21 @@ def parse_events(
                     cache_read_tokens=usage.get("cache_read_input_tokens") or 0,
                     is_sidechain=bool(record.get("isSidechain", False)),
                 )
-                events.append(event)
-                stats.event_count += 1
+                prior = best.get(dedup_key)
+                if prior is None:
+                    best[dedup_key] = event
+                else:
+                    stats.duplicate_records += 1
+                    if event.output_tokens > prior.output_tokens:
+                        best[dedup_key] = event
+
                 if stats.earliest is None or timestamp < stats.earliest:
                     stats.earliest = timestamp
                 if stats.latest is None or timestamp > stats.latest:
                     stats.latest = timestamp
 
+    events = sorted(best.values(), key=lambda e: e.timestamp)
+    stats.event_count = len(events)
     return events, stats
 
 

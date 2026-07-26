@@ -9,8 +9,43 @@ from .attribution import ATTRIBUTED, NO_BRANCH, UNMATCHED_BRANCH, bucket_for_eve
 from .config import Config
 from .cost import cost_for_event, total_cost
 from .linear import get_issues, index_by_identifier
-from .rollup import Allocation, build_project_ledger, build_ticket_ledgers, to_ledger_dict
+from .rollup import (
+    Allocation,
+    ProjectDirUsage,
+    build_project_ledger,
+    build_ticket_ledgers,
+    to_ledger_dict,
+)
 from .walker import all_project_dirs, parse_events, parse_events_multi, project_dir_for_cwd
+
+
+def _dir_usage(
+    config: Config, allocation: Allocation | None, current_dir: Path
+) -> list[ProjectDirUsage]:
+    """Per-project-directory split. Each directory is a separate working tree,
+    which across an agency is a separate client sharing the same seat -- so this
+    is where the allocation mechanism becomes visible on real data."""
+    rows: list[ProjectDirUsage] = []
+    for d in all_project_dirs():
+        events, stats = parse_events(d, config.period_start, config.period_end)
+        notional = total_cost(events).total
+        share = (
+            notional / allocation.denominator_notional
+            if allocation and allocation.denominator_notional > 0
+            else 0.0
+        )
+        rows.append(
+            ProjectDirUsage(
+                dir_name=d.name,
+                notional_token_cost=notional,
+                capacity_share_pct=share,
+                allocated_seat_cost=share * allocation.pool if allocation else 0.0,
+                event_count=stats.event_count,
+                is_current_project=(d == current_dir),
+            )
+        )
+    rows.sort(key=lambda r: r.notional_token_cost, reverse=True)
+    return rows
 
 
 def _build_allocation(config: Config) -> Allocation | None:
@@ -125,7 +160,18 @@ def run(config: Config) -> None:
     tickets = build_ticket_ledgers(
         events, issues_by_id, config.baseline_hours, config.blended_cost_rate, allocation
     )
-    project = build_project_ledger(config, events, tickets, dict(bucket_totals), allocation)
+    dir_usage = _dir_usage(config, allocation, project_dir)
+    project = build_project_ledger(
+        config, events, tickets, dict(bucket_totals), allocation, dir_usage
+    )
+
+    if len(dir_usage) > 1:
+        print("\nAgent capacity by project directory (each = a working tree; "
+              "across an agency, a client):")
+        for r in dir_usage:
+            mark = " <- this project" if r.is_current_project else ""
+            print(f"  {r.dir_name:38s} {r.capacity_share_pct:>6.1%}  "
+                  f"${r.allocated_seat_cost:>7,.2f}  {r.event_count:>4} events{mark}")
 
     m = project.measured
     print(f"\nRollup: {len(tickets)} tickets attributed")

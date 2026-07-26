@@ -101,6 +101,27 @@
     </tfoot>
   </table>
 
+  <div id="unattributed-callout" style="display:none; border-left:3px solid var(--border-danger); background:var(--bg-danger); padding:12px 14px; margin-top:1.25rem;">
+    <p id="unattributed-headline" style="font-size:13px; font-weight:500; color:var(--text-danger);"></p>
+    <p id="unattributed-detail" style="margin-top:4px; font-size:13px; color:var(--text-danger);"></p>
+  </div>
+
+  <div id="capacity-split" style="display:none; margin-top:1.5rem;">
+    <p style="font-size:13px; color:var(--text-secondary);">Agent capacity by working tree</p>
+    <p style="margin-top:2px; font-size:12px; color:var(--text-muted);">One seat is shared across every project on this machine. Across an agency each tree is a client — this is the split that decides whose seat cost is whose.</p>
+    <table style="margin-top:8px;">
+      <thead>
+        <tr style="border-bottom:0.5px solid var(--border-strong);">
+          <th>Working tree</th>
+          <th style="width:88px;" class="num">Capacity</th>
+          <th style="width:92px;" class="num">Allocated</th>
+          <th style="width:70px;" class="num">Events</th>
+        </tr>
+      </thead>
+      <tbody id="capacity-rows"></tbody>
+    </table>
+  </div>
+
   <div id="inputs-warning" style="display:none; border-left:3px solid var(--border-danger); background:var(--bg-danger); padding:12px 14px; margin-top:1.25rem;">
     <p id="inputs-warning-text" style="font-size:13px; color:var(--text-danger);"></p>
   </div>
@@ -110,6 +131,12 @@
   </div>
 
   <p id="footnote" style="margin-top:2rem; font-size:12px; color:var(--text-muted);"></p>
+  <p style="margin-top:0.75rem; font-size:12px; color:var(--text-muted);">
+    Every figure on this page is measured or explicitly null. For an illustration of what the
+    P&amp;L looks like once a real contract and human-supplied hours baseline exist, see the
+    <a href="agent-margin-example.html" style="color:inherit;">worked example</a> — kept as a
+    separate page so invented numbers can never appear alongside measured ones.
+  </p>
 
 </div>
 
@@ -231,6 +258,35 @@ fetch('ledger.json').then(r => r.json()).then(data => {
     document.getElementById('negative-callout-text').textContent =
       `${losers.length} ticket${losers.length === 1 ? '' : 's'} consumed ${money(lost)} and returned less than ${losers.length === 1 ? 'it' : 'they'} cost. ` +
       `${worst.ticket_id} alone netted ${money(worst.modelled.net_value)}.`;
+  }
+
+  // Unattributed is stated first and plainly. An honest large number is the
+  // finding -- work happening outside the ticketing system -- and burying it
+  // is how a clean-looking ledger stops being credible.
+  if (m.unattributed_pct > 0) {
+    const unattrCost = allocated
+      ? m.allocated_seat_cost * (m.unattributed_cost / m.notional_token_cost)
+      : m.unattributed_cost;
+    document.getElementById('unattributed-callout').style.display = 'block';
+    document.getElementById('unattributed-headline').textContent =
+      `${(m.unattributed_pct * 100).toFixed(0)}% of agent spend on this project wasn't on any ticket — ${money(unattrCost)}.`;
+    document.getElementById('unattributed-detail').textContent =
+      `It ran on branches with no ticket ID (typically main/master). It is real work and real cost, ` +
+      `it just isn't traceable to anything you could bill or defend. This figure is reported rather ` +
+      `than absorbed into the ticket rows: a ledger that reconciles to 100% attributed is usually ` +
+      `hiding this, not free of it.`;
+  }
+
+  const dirs = m.capacity_by_project_dir || [];
+  if (dirs.length > 1) {
+    document.getElementById('capacity-split').style.display = 'block';
+    document.getElementById('capacity-rows').innerHTML = dirs.map(d => `
+      <tr style="border-bottom:0.5px solid var(--border);">
+        <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.dir_name}${d.is_current_project ? ' <span style="font-family:var(--font-sans); color:var(--text-primary);">· this project</span>' : ''}</td>
+        <td class="num">${(d.capacity_share_pct * 100).toFixed(1)}%</td>
+        <td class="num">${money(d.allocated_seat_cost)}</td>
+        <td class="num" style="color:var(--text-secondary);">${d.event_count}</td>
+      </tr>`).join('');
   }
 
   if (!inp.verified) {

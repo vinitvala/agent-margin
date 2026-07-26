@@ -1,0 +1,172 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Margin — worked example (illustrative)</title>
+<style>
+  :root {
+    --surface-0: #faf9f7; --surface-1: #f3f2ee; --surface-2: #ffffff;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #898781;
+    --text-danger: #a32d2d; --text-success: #1d6b3a; --text-warn: #7a4b06;
+    --bg-danger: #fcebeb; --bg-success: #eaf3de; --bg-warn: #fdf3e0;
+    --border: rgba(11,11,11,0.10); --border-strong: rgba(11,11,11,0.18);
+    --border-danger: #e24b4a; --border-warn: #d99b2b; --radius: 8px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-voice: Georgia, "Times New Roman", serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-0: #1a1a19; --surface-1: #232322; --surface-2: #2c2c2a;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #898781;
+      --text-danger: #f09595; --text-success: #97c459; --text-warn: #e8bd6d;
+      --bg-danger: #501313; --bg-success: #173404; --bg-warn: #3d2c07;
+      --border: rgba(255,255,255,0.10); --border-strong: rgba(255,255,255,0.18);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem; background: var(--surface-0);
+    color: var(--text-primary); font-family: var(--font-sans);
+    font-size: 16px; line-height: 1.7;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  p { margin: 0; }
+  table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+  th { font-weight: 500; color: var(--text-secondary); text-align: left; padding: 8px 4px; }
+  td { padding: 8px 4px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .card { background: var(--surface-1); border-radius: var(--radius); padding: 1rem; }
+  .lbl { font-size: 13px; color: var(--text-secondary); }
+  .val { margin-top: 4px; font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="wrap">
+
+  <!-- This banner is the whole point of keeping this file separate. Every
+       number below is invented. It must never be possible to mistake this
+       screen for the real ledger, so this file does not read ledger.json at
+       all -- there is no code path by which measured data can reach it. -->
+  <div style="border:2px solid var(--border-warn); background:var(--bg-warn); border-radius:var(--radius); padding:14px 16px; margin-bottom:1.5rem;">
+    <p style="font-size:13px; font-weight:600; color:var(--text-warn); letter-spacing:0.04em;">WORKED EXAMPLE — ILLUSTRATIVE FIGURES ONLY</p>
+    <p style="margin-top:6px; font-size:13px; color:var(--text-warn);">
+      Every number on this page is invented, including the client, the contract, the tickets and the hours.
+      It exists to show what the ledger looks like once a real engagement supplies a contract value and a
+      human-supplied baseline for hours. It reads no measured data and never will —
+      <a href="agent-margin-mvp.html" style="color:inherit;">the real ledger is a separate page</a>.
+    </p>
+  </div>
+
+  <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding-bottom:0.75rem; border-bottom:0.5px solid var(--border);">
+    <div>
+      <p style="font-size:15px; font-weight:500;">Halcyon Freight · customer portal rebuild</p>
+      <p style="margin-top:2px; font-size:13px; color:var(--text-secondary);">Meridian Labs · fixed fee · 11 weeks · 4 engineers</p>
+    </div>
+    <span style="font-size:12px; padding:4px 10px; border-radius:var(--radius); background:var(--bg-warn); color:var(--text-warn); white-space:nowrap;">Example</span>
+  </div>
+
+  <div class="card" style="border-radius:12px; padding:1.25rem; margin:1.25rem 0;">
+    <p style="font-size:13px; color:var(--text-secondary);">You discounted this project by $20,500.00 because you use AI. AI actually netted you $12,079.00.</p>
+    <p style="margin-top:4px; font-family:var(--font-voice); font-size:52px; line-height:1.1; color:var(--text-danger); font-variant-numeric:tabular-nums;">$8,421.00</p>
+    <p style="margin-top:2px; font-size:13px; color:var(--text-secondary);">given away beyond what AI saved you</p>
+  </div>
+
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:1.25rem;">
+    <div class="card"><p class="lbl">Contract value</p><p class="val">$71,500</p></div>
+    <div class="card"><p class="lbl">AI cost (allocated seat)</p><p class="val">$5,533</p></div>
+    <div class="card"><p class="lbl">Gross margin</p><p class="val">36.7%</p></div>
+    <div class="card"><p class="lbl">Gap hours</p><p class="val" style="color:var(--text-danger);">123.8</p></div>
+  </div>
+
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;">
+    <p style="font-size:13px; color:var(--text-secondary);">14 tickets · 18% of agent spend unattributed</p>
+    <select id="sortby" style="font-size:13px; padding:6px 8px; border-radius:var(--radius); border:0.5px solid var(--border-strong); background:var(--surface-2); color:var(--text-primary); font-family:inherit;">
+      <option value="spend">Sort by AI spend</option>
+      <option value="net">Sort by net value</option>
+      <option value="id">Sort by ticket</option>
+    </select>
+  </div>
+
+  <table>
+    <thead>
+      <tr style="border-bottom:0.5px solid var(--border-strong);">
+        <th style="width:74px;">Ticket</th>
+        <th>Title</th>
+        <th style="width:86px;" class="num">Allocated</th>
+        <th style="width:76px;" class="num">Hrs saved</th>
+        <th style="width:92px;" class="num">Net value</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+    <tfoot>
+      <tr style="border-top:0.5px solid var(--border-strong);">
+        <td colspan="2" style="padding:10px 4px; font-weight:500;">Total</td>
+        <td class="num" style="padding:10px 4px; font-weight:500;">$5,533</td>
+        <td class="num" style="padding:10px 4px; font-weight:500;">259</td>
+        <td class="num" style="padding:10px 4px; font-weight:500; color:var(--text-success);">+$12,079</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div style="border-left:3px solid var(--border-danger); background:var(--bg-danger); padding:12px 14px; margin-top:1.25rem;">
+    <p style="font-size:13px; font-weight:500; color:var(--text-danger);">18% of agent spend on this project wasn't on any ticket — $1,214.</p>
+    <p style="margin-top:4px; font-size:13px; color:var(--text-danger);">It ran on branches with no ticket ID. Real work and real cost, not traceable to anything billable. Reported rather than absorbed into the ticket rows.</p>
+  </div>
+
+  <div style="border-left:3px solid var(--border-danger); background:var(--bg-danger); padding:12px 14px; margin-top:0.75rem;">
+    <p style="font-size:13px; color:var(--text-danger);">Three tickets consumed $3,116 of agent spend and returned less than they cost. HAL-115 alone burned $1,247 chasing a third-party freight API that was never going to work.</p>
+  </div>
+
+  <p style="margin-top:2rem; font-size:12px; color:var(--text-muted);">
+    Illustrative and internally consistent: 259 hours saved at a $68 blended cost rate is $17,612, less
+    $5,533 of allocated agent cost, is $12,079 net, against a $20,500 discount — leaving $8,421 given away
+    beyond what AI returned. Hours saved here come from a human-supplied baseline per ticket; the real
+    ledger leaves every hours-based figure null until someone supplies one.
+  </p>
+
+</div>
+
+<script>
+// Hardcoded, invented data. Deliberately not loaded from ledger.json -- see
+// the banner above. Columns: id, title, allocated cost, hours saved.
+const data = [
+  ['HAL-101','Auth service migration',286,31],
+  ['HAL-104','Legacy CSV importer',913,-4],
+  ['HAL-107','Portal dashboard UI',164,44],
+  ['HAL-112','Rate limiter',71,9],
+  ['HAL-115','Freight API integration',1247,12],
+  ['HAL-118','Notification service',198,27],
+  ['HAL-121','Search indexing',342,38],
+  ['HAL-124','PDF invoice export',89,14],
+  ['HAL-127','Role permissions matrix',521,21],
+  ['HAL-130','Webhook retry logic',634,8],
+  ['HAL-133','Onboarding flow',147,24],
+  ['HAL-136','Audit log viewer',118,19],
+  ['HAL-139','Bulk shipment import',756,16],
+  ['HAL-142','Refactor auth middleware',47,0]
+].map(r => ({ id: r[0], title: r[1], spend: r[2], saved: r[3], net: r[3] * 68 - r[2] }));
+
+const max = Math.max(...data.map(d => d.spend));
+const money = n => (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString();
+
+function render(key) {
+  const rows = data.slice().sort((a, b) =>
+    key === 'id' ? a.id.localeCompare(b.id) : key === 'net' ? a.net - b.net : b.spend - a.spend);
+  document.getElementById('rows').innerHTML = rows.map(d => {
+    const bad = d.net < 0;
+    const w = Math.round(d.spend / max * 100);
+    return `<tr style="border-bottom:0.5px solid var(--border);">
+      <td style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary);">${d.id}</td>
+      <td style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${d.title}</td>
+      <td class="num">
+        <div style="display:flex; align-items:center; justify-content:flex-end; gap:6px;">
+          <span style="display:block; height:4px; width:${w}%; max-width:34px; background:${bad ? '#d03b3b' : '#888780'}; border-radius:2px;"></span>
+          <span>${money(d.spend)}</span>
+        </div>
+      </td>
+      <td class="num" style="color:${d.saved <= 0 ? 'var(--text-danger)' : 'var(--text-primary)'};">${d.saved}</td>
+      <td class="num" style="color:${bad ? 'var(--text-danger)' : 'var(--text-success)'};">${d.net >= 0 ? '+' : ''}${money(d.net)}</td>
+    </tr>`;
+  }).join('');
+}
+render('spend');
+document.getElementById('sortby').addEventListener('change', e => render(e.target.value));
+</script>
