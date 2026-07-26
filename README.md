@@ -65,8 +65,9 @@ These are fixed for this build, not defaults to be revisited mid-session:
 - **Output is a single `ledger.json`.** `agent-margin-mvp.html` reads it;
   there is no other frontend.
 - **Config lives in one `config.yaml`**: contract value, blended cost rate,
-  discount given, points-to-hours factor, client name, project name, Linear
-  API key and team key, reporting period. No settings UI -- edit the file.
+  discount given, seat cost, client name, project name, Linear API key and
+  team key, reporting period, and per-ticket `baseline_hours`. No settings
+  UI -- edit the file.
 - **Single project, single client.** No auth, no database, no accounts,
   no multi-tenancy.
 - **CLI entry point:** `python -m agent_margin build` writes `ledger.json`.
@@ -83,27 +84,81 @@ answer is "that's on the cut list," not a rebuild:
 - Automated tests beyond the four verification steps in `parser-spec.md`.
 - Anything that isn't on the path to `ledger.json`.
 
-## Cost basis: notional, not necessarily metered
+## Cost basis: allocation, not a token price
 
-Costs are computed as token counts priced at Anthropic's **published API
-rates**. If Claude Code is authenticated via a subscription (Pro/Max)
-rather than a metered API key, nothing is actually billed per token, and
-the Anthropic Console usage page will show zero regardless of real usage.
-In that case every `agent_cost` figure here is a **shadow cost** -- a proxy
-for AI effort per ticket, useful for comparing against the discount given,
-but not literal money paid out. This was confirmed against a real Console
-usage page during this build's Gate 1; see git history on `master` for
-specifics.
+Under a Claude subscription (Pro/Max) **no money is billed per token** — the
+seat is a fixed cost, and the Anthropic Console shows zero usage regardless
+of how much the agent actually did. Telling a client "your agent spend on
+this project was $5,533" would therefore be false.
+
+So token cost is not used as a price. It is used as an **allocation driver**
+— ordinary activity-based costing over a real fixed cost:
+
+```
+allocated_seat_cost(ticket) =
+    (ticket_notional / all_local_notional) x seat_cost_per_month x n_seats
+```
+
+The claim becomes "this ticket consumed 11% of that developer's agent
+capacity, so 11% of their seat lands on it" — true under subscription and
+metered billing alike. `notional_token_cost` is retained in the ledger as
+the driver, explicitly not as money paid.
+
+Two things this depends on:
+
+- **The denominator spans every `~/.claude/projects/` directory**, not just
+  this project's. Scoped per project, each project independently claims the
+  full seat and the sum across projects exceeds what was actually paid.
+- **`n_seats` must be 1** unless the denominator covers every seat's
+  transcripts. This tool reads one machine, so a higher count spreads N
+  seats of cost across one person's work; the build refuses it and forces 1.
+  Team-wide allocation needs team-wide transcripts — a collection problem,
+  not a config value.
+
+Omit `seat_cost_per_month` and the ledger falls back to reporting notional
+token cost only, labelled as such.
+
+## Measured vs modelled vs inputs
+
+`ledger.json` is split into three explicitly labelled zones so a fabricated
+figure cannot be mistaken for an observed one:
+
+| Zone | Contents |
+|---|---|
+| `measured` | Token counts, capacity share, allocated seat cost, event/session counts, attribution buckets, Linear cycle time |
+| `modelled` | `baseline_hours`, `hours_saved`, `labour_cost`, `breakeven_hours`, `gap_hours`, `gap_value` — **null unless a human supplies a baseline** |
+| `inputs` | `contract_value`, `discount_given`, `blended_cost_rate`, plus `verified` |
+
+**Hours-based output requires a human-supplied baseline.** `baseline_hours`
+in `config.yaml` maps ticket ID → "what would this have taken without AI".
+There is deliberately **no** points-times-a-constant fallback: v0 shipped a
+$13,560 headline built entirely out of one, and `points_to_hours_factor`
+now raises on load rather than silently reappearing. With no baseline, the
+break-even question is reported as unanswerable and the HTML hides the
+savings and net-value columns rather than filling them with a guess.
+
+Set `inputs_verified: true` only once the contract figures are confirmed
+against a real engagement. While false, the HTML renders an explicit
+UNVERIFIED banner and suppresses derived margin and gap figures.
 
 ## Known limitations (see parser-spec.md section 7 for the full list)
 
 - A branch with multiple ticket IDs attributes to the first one found.
 - A regex-matched ticket ID not present in Linear folds into
   `unattributed_cost` rather than appearing as a phantom ticket.
-- `actual_hours` comes from Linear's own `startedAt` -> `completedAt`
-  state-transition timestamps, not a hand-entered number. A ticket left
-  "In Progress" for reasons unrelated to active work (e.g. over a
-  weekend) will inflate its `actual_hours`.
+- `linear_cycle_time_hours` is wall-clock between Linear's `startedAt` and
+  `completedAt` transitions. It is **neither human effort nor agent
+  effort** — a ticket left "In Progress" over a weekend reads as days, and
+  one closed quickly can read as seconds. Named for what it is so it can't
+  be read as hours worked; nothing is derived from it without a baseline.
+- The median-vs-mean distribution check has no statistical power below
+  ~15 tickets. It reports `n` and explicitly declines to call the result a
+  signal under that threshold, rather than warning on small-sample noise.
+- Cache multipliers (1h write 2.0x, 5m write 1.25x, read 0.10x) were
+  verified against published rates on 2026-07-26. `claude-sonnet-5` carries
+  introductory pricing through 2026-08-31; the table uses list price, which
+  shifts relative weight between Sonnet and Opus tickets in a mixed-model
+  allocation. See the caveat in `agent_margin/cost.py`.
 - Same repo, two clients is out of scope -- config assumes one project.
 - **Not pip-installable.** There's no `pyproject.toml` / console-script
   entry point, so running this against another project means copying the

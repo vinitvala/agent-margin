@@ -6,7 +6,23 @@ project_name: Customer Portal Rebuild
 contract_value: 71500.00
 blended_cost_rate: 68.00
 discount_given: 20500.00
-points_to_hours_factor: 4.0
+
+# Set true only once the three figures above are confirmed against a real
+# engagement. While false, derived margin/gap figures are marked unverified.
+inputs_verified: false
+
+# Real monthly cost of a Claude seat. Token spend allocates this across
+# tickets (see README, "Cost basis"). Omit to report notional cost only.
+seat_cost_per_month: 200.00
+# Must stay 1 unless the denominator covers every seat's transcripts.
+n_seats: 1
+
+# Human-supplied "what would this have taken without AI" hours, per ticket.
+# No entry -> every hours-based figure for that ticket stays null. There is
+# deliberately no points-times-a-constant fallback.
+baseline_hours: {}
+#   VIN-7: 20
+#   VIN-9: 12
 
 linear:
   api_key: lin_api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
