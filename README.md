@@ -11,12 +11,37 @@ and answers one question: **did the discount you gave break even?**
 See [parser-spec.md](parser-spec.md) for the full technical spec (data
 shapes, cost formula, join logic, failure modes, build order).
 
+## Prerequisites -- read this before pointing at a new project
+
+Agent Margin does **not** read a repo's code or clone anything from GitHub.
+It reads Claude Code's own session transcripts, which live locally at
+`~/.claude/projects/<encoded-cwd>/*.jsonl` -- one folder per local working
+directory Claude Code has actually been run in. That means, for any project
+you want to run this against:
+
+1. **You need a local checkout of that project**, and Claude Code must have
+   **already been used in it** (the transcript history has to exist before
+   there's anything to attribute -- a bare GitHub URL gives this tool
+   nothing to read).
+2. **You must run `python -m agent_margin build` from inside that project's
+   directory.** The tool infers which transcript folder to scan from your
+   current working directory when you invoke it.
+3. **That project's Linear tickets need branch names matching the
+   `TEAM-123` pattern** (see `parser-spec.md` section 4) -- otherwise every
+   session falls into the unmatched-branch bucket.
+4. The `agent_margin/` package and a filled-in `config.yaml` need to be
+   reachable from that directory. v0 isn't pip-installable yet, so in
+   practice that means copying this repo's `agent_margin/` folder and a
+   `config.yaml` into (or alongside) the target project -- see "Known
+   limitations" below.
+
 ## Quickstart
 
 ```bash
 pip install -r requirements.txt
 cp config.example.yaml config.yaml   # fill in real values -- gitignored
-python -m agent_margin build          # writes ledger.json
+python -m agent_margin build          # run from inside the target project's
+                                      # own directory -- writes ledger.json there
 ```
 
 Open `agent-margin-mvp.html` over a local HTTP server (fetch() of local
@@ -80,6 +105,10 @@ specifics.
   "In Progress" for reasons unrelated to active work (e.g. over a
   weekend) will inflate its `actual_hours`.
 - Same repo, two clients is out of scope -- config assumes one project.
+- **Not pip-installable.** There's no `pyproject.toml` / console-script
+  entry point, so running this against another project means copying the
+  `agent_margin/` folder and a `config.yaml` into (or alongside) it, rather
+  than running a `agent-margin` command from anywhere.
 
 ## Pipeline
 
