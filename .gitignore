@@ -1,0 +1,8 @@
+config.yaml
+ledger.json
+*.jsonl
+.cache/
+linear_cache.json
+.env
+__pycache__/
+*.pyc

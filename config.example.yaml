@@ -1,0 +1,18 @@
+# Copy to config.yaml and fill in real values. config.yaml is gitignored.
+
+client_name: Acme Corp
+project_name: Customer Portal Rebuild
+
+contract_value: 71500.00
+blended_cost_rate: 68.00
+discount_given: 20500.00
+points_to_hours_factor: 4.0
+
+linear:
+  api_key: lin_api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  team_key: VIN
+
+# Reporting period for the ledger build.
+period:
+  start: "2026-07-01T00:00:00Z"
+  end: "2026-07-31T23:59:59Z"
