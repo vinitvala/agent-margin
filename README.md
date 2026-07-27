@@ -1,4 +1,4 @@
-# Agent Margin
+# Margin
 
 Agencies bill clients a fixed fee, then burn a variable, invisible amount of
 AI coding-agent spend underneath. Clients now expect a discount because "you
